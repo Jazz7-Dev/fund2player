@@ -1,9 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { seedLocalStorageKeys } from '../utils/localStorageUtils';
 
 const AthleteDashboard = ({ athleteId = 1 }) => {
   const [campaigns, setCampaigns] = useState([]);
   const [donations, setDonations] = useState([]);
-  const [athlete, setAthlete] = useState(null);
+  const [athlete, setAthlete] = useState({
+    id: null,
+    name: '',
+    email: '',
+    joined: '',
+    campaigns: 0,
+    totalRaised: 0,
+  });
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -14,6 +22,7 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
 
   const loadData = useCallback(() => {
     try {
+      seedLocalStorageKeys();
       setLoading(true);
       setError('');
 
@@ -26,9 +35,24 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
       const athleteDonations = savedDonations.filter(d => athleteCampaigns.some(c => c.id === d.campaignId));
       setDonations(athleteDonations);
 
-      const adminData = JSON.parse(localStorage.getItem('adminData')) || { athletes: [] };
-      const athleteData = adminData.athletes.find(a => a.id === athleteId);
-      setAthlete(athleteData);
+      const adminData = JSON.parse(localStorage.getItem('adminData')) || {};
+      const athletes = Array.isArray(adminData.athletes) ? adminData.athletes : [];
+      let athleteData = athletes.find(a => a.id === athleteId);
+      if (athleteData) {
+        athleteData = {
+          ...athleteData,
+          campaigns: typeof athleteData.campaigns === 'number' ? athleteData.campaigns : 0,
+          totalRaised: typeof athleteData.totalRaised === 'number' ? athleteData.totalRaised : 0,
+        };
+      }
+      setAthlete(athleteData || {
+        id: null,
+        name: '',
+        email: '',
+        joined: '',
+        campaigns: 0,
+        totalRaised: 0,
+      });
 
       if (!athleteData) {
         setError('Athlete data not found.');
@@ -95,19 +119,21 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
     localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
     console.log('Updated campaigns in localStorage:', updatedCampaigns); // Debug log
 
-    const adminData = JSON.parse(localStorage.getItem('adminData')) || { campaigns: [] };
+    const adminData = JSON.parse(localStorage.getItem('adminData')) || {};
     adminData.campaigns = updatedCampaigns;
-    localStorage.setItem('adminData', JSON.stringify(adminData));
 
-    const updatedAthletes = adminData.athletes.map(a =>
+    const athletes = Array.isArray(adminData.athletes) ? adminData.athletes : [];
+    const updatedAthletes = athletes.map(a =>
       a.id === athleteId ? { ...a, campaigns: a.campaigns + 1 } : a
     );
     adminData.athletes = updatedAthletes;
+
     localStorage.setItem('adminData', JSON.stringify(adminData));
 
     setCampaigns(updatedCampaigns);
     setNewCampaign({ title: '', goal: '', story: '' });
-    setAthlete(prev => ({ ...prev, campaigns: prev.campaigns + 1 }));
+    setAthlete(prev => ({ ...prev, campaigns: (typeof prev.campaigns === 'number' ? prev.campaigns : 0) + 1 }));
+
 
     window.dispatchEvent(new Event('campaign-update'));
     window.dispatchEvent(new Event('storage'));
@@ -119,17 +145,19 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
 
     localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
 
-    const adminData = JSON.parse(localStorage.getItem('adminData')) || { campaigns: [] };
+    const adminData = JSON.parse(localStorage.getItem('adminData')) || {};
     adminData.campaigns = updatedCampaigns;
-    localStorage.setItem('adminData', JSON.stringify(adminData));
 
-    const updatedAthletes = adminData.athletes.map(a =>
+    const athletes = Array.isArray(adminData.athletes) ? adminData.athletes : [];
+    const updatedAthletes = athletes.map(a =>
       a.id === athleteId ? { ...a, campaigns: a.campaigns - 1 } : a
     );
     adminData.athletes = updatedAthletes;
+
     localStorage.setItem('adminData', JSON.stringify(adminData));
 
-    setAthlete(prev => ({ ...prev, campaigns: prev.campaigns - 1 }));
+    setAthlete(prev => ({ ...prev, campaigns: (typeof prev.campaigns === 'number' ? prev.campaigns : 0) - 1 }));
+
 
     window.dispatchEvent(new Event('campaign-update'));
     window.dispatchEvent(new Event('storage'));
@@ -151,8 +179,9 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
 
     localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
 
-    const adminData = JSON.parse(localStorage.getItem('adminData')) || { campaigns: [] };
+    const adminData = JSON.parse(localStorage.getItem('adminData')) || {};
     adminData.campaigns = updatedCampaigns;
+
     localStorage.setItem('adminData', JSON.stringify(adminData));
 
     setIsModalOpen(false);
@@ -232,57 +261,63 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
               <form onSubmit={handleCreateCampaign} className="space-y-6">
                 <div className="relative">
                   <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7m-9 5v6h4v-6m2-2l2 2m-9-9h9"></path>
                     </svg>
-                    <input
-                      type="text"
-                      value={newCampaign.title}
-                      onChange={(e) => setNewCampaign({ ...newCampaign, title: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
-                      placeholder=" "
-                      required
-                    />
+                    <div className="w-full relative">
+                      <input
+                        type="text"
+                        value={newCampaign.title}
+                        onChange={(e) => setNewCampaign({ ...newCampaign, title: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
+                        placeholder=" "
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Campaign Title
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Campaign Title
-                  </label>
                 </div>
                 <div className="relative">
                   <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-2c2.21 0 4 1.79 4 4s-1.79 4-4 4-4-1.79-4-4 1.79-4 4-4zm0 10c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path>
                     </svg>
-                    <input
-                      type="number"
-                      value={newCampaign.goal}
-                      onChange={(e) => setNewCampaign({ ...newCampaign, goal: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
-                      placeholder=" "
-                      min="1"
-                      required
-                    />
+                    <div className="w-full relative">
+                      <input
+                        type="number"
+                        value={newCampaign.goal}
+                        onChange={(e) => setNewCampaign({ ...newCampaign, goal: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
+                        placeholder=" "
+                        min="1"
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Funding Goal ($)
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Funding Goal ($)
-                  </label>
                 </div>
                 <div className="relative">
                   <div className="flex items-start space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4 mt-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m-12 1h8m-8 4h12m-4 4l4-4m-4 4l4 4"></path>
                     </svg>
-                    <textarea
-                      value={newCampaign.story}
-                      onChange={(e) => setNewCampaign({ ...newCampaign, story: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer resize-y min-h-[120px]"
-                      placeholder=" "
-                      required
-                    />
+                    <div className="w-full relative">
+                      <textarea
+                        value={newCampaign.story}
+                        onChange={(e) => setNewCampaign({ ...newCampaign, story: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer resize-y min-h-[120px]"
+                        placeholder=" "
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Campaign Story
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Campaign Story
-                  </label>
                 </div>
                 <button
                   type="submit"
@@ -447,57 +482,63 @@ const AthleteDashboard = ({ athleteId = 1 }) => {
               <form onSubmit={handleUpdateCampaign} className="space-y-6">
                 <div className="relative">
                   <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7m-9 5v6h4v-6m2-2l2 2m-9-9h9"></path>
                     </svg>
-                    <input
-                      type="text"
-                      value={editCampaign.title}
-                      onChange={(e) => setEditCampaign({ ...editCampaign, title: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
-                      placeholder=" "
-                      required
-                    />
+                    <div className="w-full relative">
+                      <input
+                        type="text"
+                        value={editCampaign.title}
+                        onChange={(e) => setEditCampaign({ ...editCampaign, title: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
+                        placeholder=" "
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Campaign Title
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Campaign Title
-                  </label>
                 </div>
                 <div className="relative">
                   <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-2c2.21 0 4 1.79 4 4s-1.79 4-4 4-4-1.79-4-4 1.79-4 4-4zm0 10c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path>
                     </svg>
-                    <input
-                      type="number"
-                      value={editCampaign.goal}
-                      onChange={(e) => setEditCampaign({ ...editCampaign, goal: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
-                      placeholder=" "
-                      min="1"
-                      required
-                    />
+                    <div className="w-full relative">
+                      <input
+                        type="number"
+                        value={editCampaign.goal}
+                        onChange={(e) => setEditCampaign({ ...editCampaign, goal: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer"
+                        placeholder=" "
+                        min="1"
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Funding Goal ($)
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Funding Goal ($)
-                  </label>
                 </div>
                 <div className="relative">
                   <div className="flex items-start space-x-3">
-                    <svg className="w-5 h-5 text-blue-400 absolute left-4 mt-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-5 h-5 text-blue-400 absolute left-4 top-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m-12 1h8m-8 4h12m-4 4l4-4m-4 4l4 4"></path>
                     </svg>
-                    <textarea
-                      value={editCampaign.story}
-                      onChange={(e) => setEditCampaign({ ...editCampaign, story: e.target.value })}
-                      className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer resize-y min-h-[120px]"
-                      placeholder=" "
-                      required
-                    />
+                    <div className="w-full relative">
+                      <textarea
+                        value={editCampaign.story}
+                        onChange={(e) => setEditCampaign({ ...editCampaign, story: e.target.value })}
+                        className="w-full pl-12 pr-5 py-3 bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-transparent focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-300 shadow-sm hover:shadow-md peer resize-y min-h-[120px]"
+                        placeholder=" "
+                        required
+                      />
+                      <label className="absolute left-12 top-0 -translate-y-1/2 px-1 bg-white text-sm text-gray-500 transition-all duration-300 peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-0 peer-focus:text-sm peer-focus:text-blue-500">
+                        Campaign Story
+                      </label>
+                    </div>
                   </div>
-                  <label className="absolute left-12 top-3 text-gray-400 text-sm transition-all duration-300 peer-placeholder-shown:top-3 peer-placeholder-shown:text-base peer-placeholder-shown:text-gray-400 peer-focus:top-[-10px] peer-focus:text-sm peer-focus:text-blue-500">
-                    Campaign Story
-                  </label>
                 </div>
                 <div className="flex justify-end space-x-3">
                   <button

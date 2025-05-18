@@ -3,6 +3,8 @@ import { Line } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 Chart.register(...registerables);
 
+import { seedLocalStorageKeys } from '../utils/localStorageUtils';
+
 const getMockData = () => {
   const stored = localStorage.getItem('adminData');
   if (stored) return JSON.parse(stored);
@@ -33,6 +35,7 @@ export default function AdminDashboard() {
 
   const loadData = useCallback(() => {
     try {
+      seedLocalStorageKeys();
       setLoading(true);
       setError('');
 

@@ -1,4 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  getDonations,
+  getCampaigns,
+  getDonorBalance,
+  getBalanceHistory,
+  addFunds,
+  withdrawFunds,
+  makeDonation,
+} from '../api/fakeBackend';
 
 const DonorDashboard = () => {
   const [donations, setDonations] = useState([]);
@@ -10,7 +19,7 @@ const DonorDashboard = () => {
   const [donorBalance, setDonorBalance] = useState(0);
   const [addFundsAmount, setAddFundsAmount] = useState('');
   const [withdrawFundsAmount, setWithdrawFundsAmount] = useState('');
-  const [balanceHistory, setBalanceHistory] = useState([]);
+  // Removed unused balanceHistory state to fix ESLint warning
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -23,26 +32,22 @@ const DonorDashboard = () => {
 
   const MINIMUM_BALANCE = 0;
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
-
-      // Load donations
-      const savedDonations = JSON.parse(localStorage.getItem('donations')) || [];
+  
+      const savedDonations = await getDonations();
       setDonations(savedDonations);
-
-      // Load campaigns
-      const savedCampaigns = JSON.parse(localStorage.getItem('campaigns')) || [];
+  
+      const savedCampaigns = await getCampaigns();
       setCampaigns(savedCampaigns);
-
-      // Load donor balance
-      const savedDonor = JSON.parse(localStorage.getItem('donor')) || { balance: 10000 };
-      setDonorBalance(savedDonor.balance);
-
-      // Load balance history
-      const savedBalanceHistory = JSON.parse(localStorage.getItem('balanceHistory')) || [];
-      setBalanceHistory(savedBalanceHistory);
+  
+      const savedDonorBalance = await getDonorBalance();
+      setDonorBalance(savedDonorBalance);
+  
+      // const savedBalanceHistory = await getBalanceHistory();
+      // setBalanceHistory(savedBalanceHistory);
     } catch (err) {
       setError('Failed to load data. Please try again.');
       console.error('Error loading data:', err);
@@ -59,15 +64,14 @@ const DonorDashboard = () => {
       console.log('Custom campaign-update event triggered in DonorDashboard');
       loadData();
     };
-    const handleDonationUpdate = (e) => {
+    const handleDonationUpdate = async (e) => {
       console.log('Custom donation-update event triggered in DonorDashboard');
-      loadData();
-      // Add notification for donation status updates
-      const savedDonations = JSON.parse(localStorage.getItem('donations')) || [];
+      await loadData();
+      const savedDonations = await getDonations();
       const updatedDonation = savedDonations.find(d => d.date === e.detail?.date);
       if (updatedDonation && updatedDonation.status !== 'pending') {
         setNotifications(prev => [
-          `Your donation of $${updatedDonation.amount} to "${updatedDonation.campaignTitle}" has been ${updatedDonation.status}!`,
+          `Your donation of ₹${updatedDonation.amount} to "${updatedDonation.campaignTitle}" has been ${updatedDonation.status}!`,
           ...prev.slice(0, 4),
         ]);
       }
@@ -84,99 +88,71 @@ const DonorDashboard = () => {
     };
   }, [loadData]);
 
-  const updateCampaignFunds = (campaignId, donationAmount) => {
-    const parsedAmount = parseFloat(donationAmount);
-    const updatedCampaigns = campaigns.map(c =>
-      c.id === campaignId ? { ...c, fundsRaised: (c.fundsRaised || 0) + parsedAmount } : c
+  const updateDonationStatus = (donationId, status) => {
+    const updatedDonations = donations.map(d =>
+      d.id === donationId ? { ...d, status } : d
     );
-    setCampaigns(updatedCampaigns);
-    localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
+    setDonations(updatedDonations);
+
+    const savedDonations = JSON.parse(localStorage.getItem('donations')) || [];
+    const updatedSavedDonations = savedDonations.map(d =>
+      d.id === donationId ? { ...d, status } : d
+    );
+    localStorage.setItem('donations', JSON.stringify(updatedSavedDonations));
+
+    // Dispatch events to sync other components
+    const donationEvent = new CustomEvent('donation-update', { detail: { date: updatedDonations.find(d => d.id === donationId).date } });
+    window.dispatchEvent(donationEvent);
     window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new Event('campaign-update'));
+
+    setNotifications(prev => [
+      `Donation ${donationId} has been ${status}!`,
+      ...prev.slice(0, 4),
+    ]);
   };
 
-  const updateDonorBalance = (newBalance, action, amount) => {
-    setDonorBalance(newBalance);
-    localStorage.setItem('donor', JSON.stringify({ balance: newBalance }));
-
-    const newHistoryEntry = {
-      id: Date.now(),
-      action,
-      amount: parseFloat(amount),
-      balanceAfter: newBalance,
-      date: new Date().toISOString(),
-    };
-    const updatedHistory = [newHistoryEntry, ...balanceHistory].slice(0, 50);
-    setBalanceHistory(updatedHistory);
-    localStorage.setItem('balanceHistory', JSON.stringify(updatedHistory));
-  };
-
-  const logActivity = (message, amount = 0) => {
+  const handleAddFundsConfirmed = async () => {
     try {
-      const activities = JSON.parse(localStorage.getItem('activities')) || [];
-      activities.unshift({
-        message,
-        timeAgo: new Date().toLocaleString(),
-        amount,
-      });
-      localStorage.setItem('activities', JSON.stringify(activities.slice(0, 10)));
-      window.dispatchEvent(new Event('storage'));
-      window.dispatchEvent(new Event('campaign-update'));
+      const parsedAmount = parseFloat(confirmAmount);
+      const newBalance = await addFunds(donorBalance, parsedAmount);
+      setDonorBalance(newBalance);
+      setAddFundsSuccess(true);
+      setAddFundsAmount('');
+      setTimeout(() => setAddFundsSuccess(false), 3000);
+      setError('');
+      setShowConfirmModal(false);
+      setConfirmAction(null);
+      setConfirmAmount(0);
     } catch (err) {
-      console.error('Error logging activity:', err);
+      setError('Failed to add funds. Please try again.');
+      console.error(err);
     }
   };
 
-  const handleAddFunds = () => {
-    const parsedAddAmount = parseFloat(addFundsAmount);
-    if (!parsedAddAmount || parsedAddAmount <= 0) {
-      setError('Please enter a valid amount to add');
-      return;
+  const handleWithdrawFundsConfirmed = async () => {
+    try {
+      const parsedAmount = parseFloat(confirmAmount);
+      const newBalance = await withdrawFunds(donorBalance, parsedAmount);
+      setDonorBalance(newBalance);
+      setWithdrawFundsSuccess(true);
+      setWithdrawFundsAmount('');
+      setTimeout(() => setWithdrawFundsSuccess(false), 3000);
+      setError('');
+      setShowConfirmModal(false);
+      setConfirmAction(null);
+      setConfirmAmount(0);
+    } catch (err) {
+      setError('Failed to withdraw funds. Please try again.');
+      console.error(err);
     }
-    setConfirmAction('add');
-    setConfirmAmount(parsedAddAmount);
-    setShowConfirmModal(true);
-  };
-
-  const handleWithdrawFunds = () => {
-    const parsedWithdrawAmount = parseFloat(withdrawFundsAmount);
-    if (!parsedWithdrawAmount || parsedWithdrawAmount <= 0) {
-      setError('Please enter a valid amount to withdraw');
-      return;
-    }
-    if (parsedWithdrawAmount > donorBalance) {
-      setError('Cannot withdraw more than your current balance');
-      return;
-    }
-    if (donorBalance - parsedWithdrawAmount < MINIMUM_BALANCE) {
-      setError(`Cannot withdraw below the minimum balance of $${MINIMUM_BALANCE}`);
-      return;
-    }
-    setConfirmAction('withdraw');
-    setConfirmAmount(parsedWithdrawAmount);
-    setShowConfirmModal(true);
   };
 
   const confirmActionHandler = () => {
     if (confirmAction === 'add') {
-      const newBalance = donorBalance + confirmAmount;
-      updateDonorBalance(newBalance, 'Added Funds', confirmAmount);
-      logActivity(`Added $${confirmAmount} to balance`, confirmAmount);
-      setAddFundsSuccess(true);
-      setAddFundsAmount('');
-      setTimeout(() => setAddFundsSuccess(false), 3000);
+      handleAddFundsConfirmed();
     } else if (confirmAction === 'withdraw') {
-      const newBalance = donorBalance - confirmAmount;
-      updateDonorBalance(newBalance, 'Withdrew Funds', confirmAmount);
-      logActivity(`Withdrew $${confirmAmount} from balance`, -confirmAmount);
-      setWithdrawFundsSuccess(true);
-      setWithdrawFundsAmount('');
-      setTimeout(() => setWithdrawFundsSuccess(false), 3000);
+      handleWithdrawFundsConfirmed();
     }
-    setError('');
-    setShowConfirmModal(false);
-    setConfirmAction(null);
-    setConfirmAmount(0);
   };
 
   const handleSubmit = async (e) => {
@@ -214,44 +190,18 @@ const DonorDashboard = () => {
         throw new Error('This campaign is not active for donations.');
       }
 
-      const campaignTitle = selectedCampaignData.title;
-      const newBalance = donorBalance - parsedAmount;
-      updateDonorBalance(newBalance, `Donation to "${campaignTitle}"`, parsedAmount);
-
-      const newDonation = {
-        id: Date.now(),
+      const donationData = {
         campaignId: campaignId,
-        campaignTitle,
+        campaignTitle: selectedCampaignData.title,
         donorName,
         donorEmail,
         amount: parsedAmount,
-        date: new Date().toISOString(),
-        status: 'pending',
         athleteId: selectedCampaignData.athleteId,
+        status: 'pending', // New donations start as pending approval
       };
 
-      const updatedDonations = [newDonation, ...donations];
-      setDonations(updatedDonations);
-      localStorage.setItem('donations', JSON.stringify(updatedDonations));
-
-      const adminData = JSON.parse(localStorage.getItem('adminData')) || { transactions: [] };
-      const newTransaction = {
-        id: newDonation.id,
-        donor: donorName,
-        amount: parsedAmount,
-        date: newDonation.date,
-        athleteId: selectedCampaignData.athleteId,
-        status: 'pending',
-      };
-      adminData.transactions = [newTransaction, ...adminData.transactions];
-      localStorage.setItem('adminData', JSON.stringify(adminData));
-
-      updateCampaignFunds(campaignId, parsedAmount);
-      logActivity(`Donation to "${campaignTitle}" by ${donorName}`, parsedAmount);
-
-      const donationEvent = new CustomEvent('donation-update', { detail: { date: newDonation.date } });
-      window.dispatchEvent(donationEvent);
-      window.dispatchEvent(new Event('storage'));
+      const newBalance = await makeDonation(donationData, donorBalance);
+      setDonorBalance(newBalance);
 
       setSuccess(true);
       setDonorName('');
@@ -265,6 +215,26 @@ const DonorDashboard = () => {
       setLoading(false);
     }
   };
+
+  // Filter pending donations for this donor by donorEmail
+  // Filter pending donations for this donor by donorEmail, normalized for case and whitespace
+  const normalizedDonorEmail = donorEmail.trim().toLowerCase();
+  const pendingDonations = donorEmail
+    ? donations.filter(d => d.status === 'pending' && d.donorEmail && d.donorEmail.trim().toLowerCase() === normalizedDonorEmail)
+    : [];
+
+  console.log('Donor Email:', donorEmail);
+  console.log('Normalized Donor Email:', normalizedDonorEmail);
+  console.log('Pending Donations Count:', pendingDonations.length);
+
+  // Filter campaigns to exclude those whose goal is met by completed donations
+  const activeCampaigns = campaigns.filter(c => {
+    const totalCompletedDonations = donations
+      .filter(d => d.campaignId === c.id && d.status === 'completed')
+      .reduce((sum, d) => sum + d.amount, 0);
+    // Also exclude campaigns that are not active
+    return totalCompletedDonations < c.goal && c.status === 'active';
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-8">
@@ -300,7 +270,7 @@ const DonorDashboard = () => {
               </h3>
               <p className="text-gray-600 mb-4">
                 Are you sure you want to {confirmAction === 'add' ? 'add' : 'withdraw'}{' '}
-                <span className="font-bold">${confirmAmount}</span>{' '}
+                <span className="font-bold">₹{confirmAmount}</span>{' '}
                 {confirmAction === 'add' ? 'to' : 'from'} your balance?
               </p>
               <div className="flex justify-end space-x-3">
@@ -360,261 +330,150 @@ const DonorDashboard = () => {
             {/* Display Donor Balance and Add/Withdraw Funds */}
             <div className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-8 border border-white/20">
               <h2 className="text-xl font-semibold mb-4 text-gray-800">Your Balance</h2>
-              <p className="text-lg text-gray-700">
-                Available Balance: <span className="font-bold text-blue-600">${donorBalance}</span>
-              </p>
-              <div className="mt-4 space-y-4">
-                <div className="flex items-center space-x-4">
+              <p className="text-3xl font-bold text-indigo-700 mb-4">${donorBalance.toLocaleString()}</p>
+              <div className="flex space-x-4">
+                <div className="flex-1">
                   <input
                     type="number"
+                    min="1"
                     value={addFundsAmount}
                     onChange={(e) => setAddFundsAmount(e.target.value)}
-                    className="w-32 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Add Funds ($)"
-                    min="1"
+                    placeholder="Add funds amount"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
                   />
                   <button
-                    onClick={handleAddFunds}
-                    className="py-2 px-4 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition-all duration-300"
+                    disabled={!addFundsAmount || isNaN(addFundsAmount) || addFundsAmount <= 0}
+                    onClick={() => {
+                      setConfirmAction('add');
+                      setConfirmAmount(addFundsAmount);
+                      setShowConfirmModal(true);
+                    }}
+                    className="mt-2 w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
                   >
                     Add Funds
                   </button>
+                  {addFundsSuccess && (
+                    <p className="mt-2 text-green-600 font-semibold">Funds added successfully!</p>
+                  )}
                 </div>
-                {addFundsSuccess && (
-                  <div className="text-green-600 text-sm p-2 rounded bg-green-50 flex items-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 mr-2"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    Funds added successfully! 🎉
-                  </div>
-                )}
-                <div className="flex items-center space-x-4">
+                <div className="flex-1">
                   <input
                     type="number"
+                    min="1"
                     value={withdrawFundsAmount}
                     onChange={(e) => setWithdrawFundsAmount(e.target.value)}
-                    className="w-32 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Withdraw Funds ($)"
-                    min="1"
+                    placeholder="Withdraw funds amount"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
                   />
                   <button
-                    onClick={handleWithdrawFunds}
-                    className="py-2 px-4 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-all duration-300"
+                    disabled={
+                      !withdrawFundsAmount ||
+                      isNaN(withdrawFundsAmount) ||
+                      withdrawFundsAmount <= 0 ||
+                      withdrawFundsAmount > donorBalance
+                    }
+                    onClick={() => {
+                      setConfirmAction('withdraw');
+                      setConfirmAmount(withdrawFundsAmount);
+                      setShowConfirmModal(true);
+                    }}
+                    className="mt-2 w-full py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
                   >
                     Withdraw Funds
                   </button>
+                  {withdrawFundsSuccess && (
+                    <p className="mt-2 text-red-600 font-semibold">Funds withdrawn successfully!</p>
+                  )}
                 </div>
-                {withdrawFundsSuccess && (
-                  <div className="text-green-600 text-sm p-2 rounded bg-green-50 flex items-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 mr-2"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    Funds withdrawn successfully! 🎉
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Balance History */}
-            <div className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-8 border border-white/20">
-              <h2 className="text-xl font-semibold mb-6 text-gray-800">Balance History</h2>
-              {balanceHistory.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No balance changes yet.</p>
-              ) : (
-                <div className="space-y-4">
-                  {balanceHistory.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="bg-white/50 p-4 rounded-lg border border-white/20 shadow-sm hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <h3 className="font-semibold text-gray-800">{entry.action}</h3>
-                          <p className="text-sm text-gray-600">
-                            {new Date(entry.date).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p
-                            className={`font-bold ${
-                              entry.action.includes('Withdrew') || entry.action.includes('Donation')
-                                ? 'text-red-600'
-                                : 'text-green-600'
-                            }`}
-                          >
-                            {entry.action.includes('Withdrew') || entry.action.includes('Donation')
-                              ? '-'
-                              : '+'}
-                            ${Math.abs(entry.amount)}
-                          </p>
-                          <p className="text-xs text-gray-500">Balance: ${entry.balanceAfter}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Donation Form */}
-            <div className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-8 border border-white/20">
-              <h2 className="text-xl font-semibold mb-6 text-gray-800">Make a Donation</h2>
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="relative group">
-                  <select
-                    value={selectedCampaign}
-                    onChange={(e) => setSelectedCampaign(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  >
-                    <option value="">Select a Campaign</option>
-                    {campaigns.map(campaign => (
-                      <option key={campaign.id} value={campaign.id}>
-                        {campaign.title} (Goal: ${campaign.goal}, Raised: ${(campaign.fundsRaised || 0).toLocaleString()}, Status: {campaign.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="relative group">
-                    <input
-                      type="text"
-                      value={donorName}
-                      onChange={(e) => setDonorName(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="Your Name"
-                      required
-                    />
-                  </div>
-                  <div className="relative group">
-                    <input
-                      type="email"
-                      value={donorEmail}
-                      onChange={(e) => setDonorEmail(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="Your Email"
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="relative group">
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Amount ($)"
-                    min="1"
-                    required
-                  />
-                </div>
-                {error && <div className="text-red-600 text-sm p-2 rounded bg-red-50">{error}</div>}
-                {success && (
-                  <div className="text-green-600 text-sm p-2 rounded bg-green-50 flex items-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 mr-2"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    Donation successful! Thank you! 🎉
-                  </div>
-                )}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 px-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-300 disabled:opacity-50"
+            <form onSubmit={handleSubmit} className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-8 border border-white/20">
+              <h2 className="text-xl font-semibold mb-4 text-gray-800">Make a Donation</h2>
+              {error && <p className="text-red-600 mb-4">{error}</p>}
+              {success && <p className="text-green-600 mb-4">Donation successful!</p>}
+              <div className="mb-4">
+                <label htmlFor="donorName" className="block mb-1 font-semibold text-gray-700">Name</label>
+                <input
+                  id="donorName"
+                  type="text"
+                  value={donorName}
+                  onChange={(e) => setDonorName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
+                  required
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="donorEmail" className="block mb-1 font-semibold text-gray-700">Email</label>
+                <input
+                  id="donorEmail"
+                  type="email"
+                  value={donorEmail}
+                  onChange={(e) => setDonorEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
+                  required
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="selectedCampaign" className="block mb-1 font-semibold text-gray-700">Select Campaign</label>
+                <select
+                  id="selectedCampaign"
+                  value={selectedCampaign}
+                  onChange={(e) => setSelectedCampaign(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
+                  required
                 >
-                  {loading ? (
-                    <span className="flex items-center justify-center">
-                      <svg className="animate-spin h-5 w-5 mr-3 text-white" viewBox="0 0 24 24">
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                          fill="none"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                      Processing...
-                    </span>
-                  ) : (
-                    'Donate Now'
-                  )}
-                </button>
-              </form>
-            </div>
-
-            {/* Recent Donations */}
-            <div className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 border border-white/20">
-              <h2 className="text-xl font-semibold mb-6 text-gray-800">Recent Donations</h2>
-              {donations.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No donations yet. Be the first to support! ❤️</p>
-              ) : (
-                <div className="space-y-4">
-                  {donations.map((donation) => (
-                    <div
-                      key={donation.id}
-                      className="bg-white/50 p-4 rounded-lg border border-white/20 shadow-sm hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <h3 className="font-semibold text-gray-800">{donation.donorName}</h3>
-                          <p className="text-sm text-gray-600">{donation.donorEmail}</p>
-                          <p className="text-sm text-gray-600">Campaign: {donation.campaignTitle}</p>
-                          <p className="text-sm text-gray-600">Status: {donation.status}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-blue-600">${donation.amount}</p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(donation.date).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                  <option value="">-- Select a campaign --</option>
+                  {activeCampaigns.map(campaign => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.title} (Goal: ${campaign.goal.toLocaleString()})
+                    </option>
                   ))}
-                </div>
+                </select>
+              </div>
+              <div className="mb-4">
+                <label htmlFor="amount" className="block mb-1 font-semibold text-gray-700">Amount</label>
+                <input
+                  id="amount"
+                  type="number"
+                  min="1"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+              >
+                Donate
+              </button>
+            </form>
+
+            {/* Pending Donations Approval Section removed as per user request */}
+
+            {/* Donation History */}
+            <div className="bg-white/30 backdrop-blur-lg rounded-2xl shadow-xl p-6 border border-white/20 mt-8">
+              <h2 className="text-xl font-semibold mb-4 text-gray-800">Donation History</h2>
+              {donations.length === 0 ? (
+                <p className="text-gray-600">No donations yet.</p>
+              ) : (
+                <ul className="space-y-4 max-h-96 overflow-y-auto">
+                  {donations.map(donation => (
+                    <li key={donation.id} className="p-4 bg-white rounded-lg shadow-md">
+                      <p className="font-semibold text-gray-800">{donation.donorName} donated ${donation.amount.toLocaleString()}</p>
+                      <p className="text-gray-600 text-sm">{donation.campaignTitle}</p>
+                      <p className="text-gray-500 text-xs">{new Date(donation.date).toLocaleString()}</p>
+                      <p className={`text-sm font-medium ${
+                        donation.status === 'completed' ? 'text-green-600' :
+                        donation.status === 'pending' ? 'text-yellow-600' : 'text-red-600'
+                      }`}>{donation.status}</p>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           </>
